@@ -1,0 +1,72 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      modsets: ${{ steps.modsets.outputs.modsets }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: modsets
+        run: |
+          modsets="$(
+            find . -mindepth 1 -maxdepth 1 -type d \
+              \( -exec test -d '{}/plugins' \; -o -exec test -d '{}/config' \; \) \
+              -printf '%f\n' \
+              | sort \
+              | jq -R -s -c 'split("\n")[:-1]'
+          )"
+          echo "modsets=$modsets" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        modset: ${{ fromJson(needs.discover.outputs.modsets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31.10.6
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - name: Build modset
+        run: |
+          mkdir -p dist
+          nix build --no-write-lock-file ".#${{ matrix.modset }}" --out-link result
+          tar -C result -czf "dist/${{ matrix.modset }}.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: modset-${{ matrix.modset }}
+          path: dist/${{ matrix.modset }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: modset-*
+          path: dist
+          merge-multiple: true
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Built from $GITHUB_SHA."
+          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz --clobber
