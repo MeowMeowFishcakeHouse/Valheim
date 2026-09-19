@@ -1,6 +1,6 @@
 # Terraria
 
-This repo contains modsets used for my terraria server.
+This repo contains modsets used for my valheim server.
 
 ## Getting modset
 
