@@ -1,4 +1,4 @@
-# Terraria
+# Valheim
 
 This repo contains modsets used for my valheim server.
 
